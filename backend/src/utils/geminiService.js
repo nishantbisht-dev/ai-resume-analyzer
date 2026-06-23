@@ -2,7 +2,7 @@ import { GoogleGenAI } from "@google/genai";
 
 const getGeminiClient = () => {
   if (!process.env.GEMINI_API_KEY) {
-    throw new Error("GEMINI_API_KEY is missing in .env file");
+    throw new Error("GEMINI_API_KEY is missing in Render environment variables");
   }
 
   return new GoogleGenAI({
@@ -12,6 +12,10 @@ const getGeminiClient = () => {
 
 const safeJsonParse = (text) => {
   try {
+    if (!text) {
+      throw new Error("Empty AI response received");
+    }
+
     const cleanedText = text
       .replace(/```json/gi, "")
       .replace(/```/g, "")
@@ -19,7 +23,7 @@ const safeJsonParse = (text) => {
 
     return JSON.parse(cleanedText);
   } catch (error) {
-    throw new Error("AI response was not valid JSON");
+    throw new Error(`AI response was not valid JSON: ${text}`);
   }
 };
 
@@ -57,38 +61,48 @@ Rules:
 - Keep all text simple and beginner-friendly.
 
 Resume:
-${resumeText}
+${resumeText.slice(0, 8000)}
 
 Job Description:
 ${jobDescription}
 `;
 
-  const response = await ai.models.generateContent({
-    model: "gemini-2.5-flash",
-    contents: prompt,
-    config: {
-      responseMimeType: "application/json",
-      temperature: 0.2,
-    },
-  });
+  try {
+    const response = await ai.models.generateContent({
+      model: "gemini-1.5-flash",
+      contents: prompt,
+      config: {
+        responseMimeType: "application/json",
+        temperature: 0.2,
+      },
+    });
 
-  const parsedResult = safeJsonParse(response.text);
+    const responseText =
+      typeof response.text === "function" ? response.text() : response.text;
 
-  return {
-    matchScore: Number(parsedResult.matchScore) || 0,
-    summary: parsedResult.summary || "No summary generated.",
-    missingSkills: Array.isArray(parsedResult.missingSkills)
-      ? parsedResult.missingSkills
-      : [],
-    strongSkills: Array.isArray(parsedResult.strongSkills)
-      ? parsedResult.strongSkills
-      : [],
-    improvementSuggestions: Array.isArray(parsedResult.improvementSuggestions)
-      ? parsedResult.improvementSuggestions
-      : [],
-    improvedBulletPoints: Array.isArray(parsedResult.improvedBulletPoints)
-      ? parsedResult.improvedBulletPoints
-      : [],
-    finalAdvice: parsedResult.finalAdvice || "No final advice generated.",
-  };
+    const parsedResult = safeJsonParse(responseText);
+
+    return {
+      matchScore: Math.min(
+        100,
+        Math.max(0, Number(parsedResult.matchScore) || 0)
+      ),
+      summary: parsedResult.summary || "No summary generated.",
+      missingSkills: Array.isArray(parsedResult.missingSkills)
+        ? parsedResult.missingSkills
+        : [],
+      strongSkills: Array.isArray(parsedResult.strongSkills)
+        ? parsedResult.strongSkills
+        : [],
+      improvementSuggestions: Array.isArray(parsedResult.improvementSuggestions)
+        ? parsedResult.improvementSuggestions
+        : [],
+      improvedBulletPoints: Array.isArray(parsedResult.improvedBulletPoints)
+        ? parsedResult.improvedBulletPoints
+        : [],
+      finalAdvice: parsedResult.finalAdvice || "No final advice generated.",
+    };
+  } catch (error) {
+    throw new Error(`Gemini analysis failed: ${error.message}`);
+  }
 };
